@@ -18,6 +18,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -95,14 +96,23 @@ def search(query, type_="blog", display=10, start=1, sort="sim"):
         headers = {"X-NCP-APIGW-API-KEY-ID": cid, "X-NCP-APIGW-API-KEY": secret}
     url = base.format(type=type_) + "?" + urllib.parse.urlencode(params)
     req = urllib.request.Request(url, headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=15) as r:
-            return json.loads(r.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", "replace")
-        sys.exit(f"❌ API 오류 {e.code}: {body}")
-    except urllib.error.URLError as e:
-        sys.exit(f"❌ 네트워크 오류: {e.reason} (naverapihub.apigw.ntruss.com / openapi.naver.com 접속 허용 여부 확인)")
+    # 일시적인 연결 끊김(Connection reset 등)은 잠깐 쉬었다가 최대 4번 재시도
+    for attempt in range(4):
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                return json.loads(r.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            if e.code in (429, 500, 502, 503) and attempt < 3:
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            body = e.read().decode("utf-8", "replace")
+            sys.exit(f"❌ API 오류 {e.code}: {body}")
+        except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
+            if attempt < 3:
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            reason = getattr(e, "reason", e)
+            sys.exit(f"❌ 네트워크 오류: {reason} (naverapihub.apigw.ntruss.com / openapi.naver.com 접속 허용 여부 확인)")
 
 
 def main():
