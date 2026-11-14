@@ -41,6 +41,7 @@ TYPES = {
     "book": ["title", "author", "publisher", "pubdate", "discount", "link"],
     "encyc": ["title", "link", "description"],
     "image": ["title", "link", "thumbnail", "sizewidth", "sizeheight"],
+    "errata": ["errata"],  # 오타변환 (예: 'dkssud' → '안녕')
 }
 # 정렬 옵션: 대부분 sim(정확도)/date(최신), 쇼핑은 asc/dsc(가격순) 추가
 SORTS = ["sim", "date", "asc", "dsc", "random", "comment"]
@@ -118,7 +119,8 @@ def main():
     load_env_file()
     data = search(a.query, a.type, a.display, a.start, a.sort)
     fields = TYPES[a.type]
-    items = [{f: clean(it.get(f)) for f in fields} for it in data.get("items", [])]
+    raw = [data] if a.type == "errata" else data.get("items", [])  # 오타변환은 결과가 1개
+    items = [{f: clean(it.get(f)) for f in fields} for it in raw]
 
     if a.csv:
         with open(a.csv, "w", newline="", encoding="utf-8-sig") as fp:
