@@ -127,6 +127,9 @@ def main():
     p.add_argument("--must", default=None,
                    help="콤마 구분. 글에 꼭 있어야 하는 단어 (기본: 검색어에서 '후기/꿀팁' 같은 일반어 뺀 단어)")
     p.add_argument("--keywords", default="", help="콤마로 구분, 몇 개 글에 나오는지 확인할 단어")
+    p.add_argument("--aspects", default="",
+                   help="콤마 구분 세부 주제. '검색어+주제'로 다시 검색해서 글마다 그 주제 문장을 모은다 (본문 대신 요약문 여러 개)")
+    p.add_argument("--aspect-show", type=int, default=12, help="주제별로 보여줄 문장 수")
     p.add_argument("--top", type=int, default=40, help="공통 단어 상위 몇 개")
     p.add_argument("--show", type=int, default=40, help="기간별로 출력할 글 수")
     p.add_argument("--format", "-f", default="markdown", choices=["markdown", "json"])
@@ -135,22 +138,42 @@ def main():
 
     load_env_file()
     today = date.today()
-    rows, seen = [], set()
+    rows, by_link = [], {}
+
+    def add(r, aspect=None):
+        """같은 글이 다시 나오면 버리지 않고 '새 문장(요약문)'만 덧붙인다."""
+        link = r.get("link")
+        if link not in by_link:
+            r["ad"] = is_ad(r)
+            r["snips"] = {}
+            by_link[link] = r
+            rows.append(r)
+        base = by_link[link]
+        if aspect and r.get("description") and r["description"] != base.get("description"):
+            base["snips"].setdefault(aspect, r["description"])
+            base["ad"] = base["ad"] or is_ad(r)
+
+    aspects = [x.strip() for x in a.aspects.split(",") if x.strip()]
+    types = [x.strip() for x in a.types.split(",") if x.strip()]
     for q in a.queries:
         if a.must is not None:
             must = [m.strip() for m in a.must.split(",") if m.strip()]
         else:
             must = [w for w in q.split() if w not in GENERIC]
-        for t in [x.strip() for x in a.types.split(",") if x.strip()]:
+        for t in types:
             # 최신순 = 최근 글 확보, 정확도순 = 3~12개월 사이의 좋은 글 확보
             plan = [("date", a.cafe_pages if t == "cafearticle" else a.pages), ("sim", 1)]
             for sort, pages in plan:
                 for r in collect(q, t, today, pages, sort, must):
-                    if r.get("link") in seen:
-                        continue
-                    seen.add(r.get("link"))
-                    r["ad"] = is_ad(r)
-                    rows.append(r)
+                    add(r)
+            # 세부 주제별 재검색: 요약문이 그 주제 문장 주변으로 바뀌어서 나온다
+            for asp in aspects:
+                for sort in ("date", "sim"):
+                    for r in collect(f"{q} {asp}", t, today, 1, sort, must + [asp]):
+                        if r.get("link") not in by_link:
+                            r["snips"] = {}
+                        add(r)
+                        by_link[r["link"]]["snips"].setdefault(asp, r.get("description", ""))
 
     order = {"recent": 0, "year": 1, "nodate": 2}
     rows.sort(key=lambda r: (order[r["period"]], r["ad"], r.get("age_days", 0)))
@@ -165,6 +188,9 @@ def main():
         "common_words_recent": common_words([r for r in non_ad if r["period"] != "year"], qwords, a.top),
         "common_words_all": common_words(non_ad, qwords, a.top),
         "keywords": keyword_hits(non_ad, [k.strip() for k in a.keywords.split(",") if k.strip()]),
+        "aspects": {asp: [{"link": r["link"], "title": r.get("title", ""), "period": r["period"],
+                           "postdate": r.get("postdate", ""), "text": r["snips"][asp]}
+                          for r in non_ad if asp in r.get("snips", {})] for asp in aspects},
         "items": rows,
     }
 
@@ -188,6 +214,21 @@ def main():
         for k, v in result["keywords"].items():
             print(f"- {k}: {v['count']}개 글 " + " ".join(v["links"][:3]))
         print()
+    if result["aspects"]:
+        print("## 🧩 주제별 문장 모음 (광고 제외, 최근 글 먼저)")
+        for asp, lst in result["aspects"].items():
+            print(f"### {asp} — {len(lst)}개 글")
+            for x in lst[: a.aspect_show]:
+                mark = {"recent": "🟢", "year": "🟡", "nodate": "⚪"}[x["period"]]
+                print(f"- {mark} {x['text'][:200]} ({x['postdate'] or '카페'}) {x['link']}")
+        print()
+        rich = sorted([r for r in non_ad if len(r.get("snips", {})) >= 2], key=lambda r: -len(r["snips"]))
+        if rich:
+            print("## 📌 여러 주제를 다룬 알짜 글 (주제 수 많은 순)")
+            for r in rich[:15]:
+                print(f"- **{r.get('title', '')}** ({r.get('postdate') or '카페'}) "
+                      f"[{', '.join(r['snips'])}] {r['link']}")
+            print()
     titles = {"recent": "🟢 최근 3개월", "year": "🟡 3~12개월", "nodate": "⚪ 카페 (날짜 미상, 최신순 상위)"}
     for k, title in titles.items():
         part = [r for r in rows if r["period"] == k][: a.show]
