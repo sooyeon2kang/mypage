@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-네이버 검색 Open API 호출 스크립트 (표준 라이브러리만 사용 → 별도 설치 불필요)
+네이버 검색 API 호출 스크립트 (NAVER API HUB 기본, 기존 openapi.naver.com 키도 지원) (표준 라이브러리만 사용 → 별도 설치 불필요)
 
 사용 예:
     python3 naver_search.py "주차장 운영 수익" --type news --display 10 --sort date
@@ -23,7 +23,11 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-API_BASE = "https://openapi.naver.com/v1/search/{type}.json"
+# NAVER API HUB(네이버 클라우드, 신규 발급 키) ↔ 기존 개발자센터(openapi.naver.com) 키
+HUB_BASE = "https://naverapihub.apigw.ntruss.com/search/v1/{type}"
+LEGACY_BASE = "https://openapi.naver.com/v1/search/{type}.json"
+# HUB에 대응 API가 없는 종류 (기존 개발자센터 키로만 가능)
+LEGACY_ONLY = {"shop", "book"}
 
 # 검색 종류 → 출력할 주요 필드
 TYPES = {
@@ -71,18 +75,25 @@ def search(query, type_="blog", display=10, start=1, sort="sim"):
     if not cid or not secret:
         sys.exit(
             "❌ NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 가 없습니다.\n"
-            "   https://developers.naver.com 에서 애플리케이션을 등록하고(검색 API 선택)\n"
+            "   console.ncloud.com > NAVER API HUB 에서 Application을 등록하고\n"
             "   환경변수 또는 .env 파일에 넣어주세요."
         )
     params = {"query": query, "display": display, "start": start}
     # 지역(local)은 random/comment 정렬만, 나머지는 sim/date/asc/dsc만 허용
     if (type_ == "local") == (sort in ("random", "comment")):
         params["sort"] = sort
-    url = API_BASE.format(type=type_) + "?" + urllib.parse.urlencode(params)
-    req = urllib.request.Request(
-        url,
-        headers={"X-Naver-Client-Id": cid, "X-Naver-Client-Secret": secret},
-    )
+    # 기본은 API HUB 방식. 예전 개발자센터 키면 .env에 NAVER_API_LEGACY=1
+    legacy = os.environ.get("NAVER_API_LEGACY", "").strip() in ("1", "true", "yes")
+    if not legacy and type_ in LEGACY_ONLY:
+        sys.exit(f"❌ '{type_}' 검색은 NAVER API HUB에 없습니다 (기존 개발자센터 키 + NAVER_API_LEGACY=1 필요)")
+    if legacy:
+        base = LEGACY_BASE
+        headers = {"X-Naver-Client-Id": cid, "X-Naver-Client-Secret": secret}
+    else:
+        base = HUB_BASE
+        headers = {"X-NCP-APIGW-API-KEY-ID": cid, "X-NCP-APIGW-API-KEY": secret}
+    url = base.format(type=type_) + "?" + urllib.parse.urlencode(params)
+    req = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=15) as r:
             return json.loads(r.read().decode("utf-8"))
@@ -90,7 +101,7 @@ def search(query, type_="blog", display=10, start=1, sort="sim"):
         body = e.read().decode("utf-8", "replace")
         sys.exit(f"❌ API 오류 {e.code}: {body}")
     except urllib.error.URLError as e:
-        sys.exit(f"❌ 네트워크 오류: {e.reason} (openapi.naver.com 접속 허용 여부 확인)")
+        sys.exit(f"❌ 네트워크 오류: {e.reason} (naverapihub.apigw.ntruss.com / openapi.naver.com 접속 허용 여부 확인)")
 
 
 def main():

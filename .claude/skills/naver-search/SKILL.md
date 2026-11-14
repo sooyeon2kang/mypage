@@ -5,7 +5,8 @@ description: 네이버 검색 Open API로 블로그·뉴스·웹문서·지역(�
 
 # 네이버 검색 스킬
 
-네이버 검색 Open API(`openapi.naver.com`)를 `scripts/naver_search.py`로 호출한다.
+네이버 검색 API를 `scripts/naver_search.py`로 호출한다.
+기본은 NAVER API HUB(`naverapihub.apigw.ntruss.com`), `NAVER_API_LEGACY=1`이면 기존 `openapi.naver.com`.
 표준 라이브러리만 쓰므로 설치할 패키지가 없다.
 
 ## 실행 방법
@@ -28,7 +29,7 @@ python3 .claude/skills/naver-search/scripts/naver_search.py "<검색어>" --type
 - 최근 동향·기사 → `news --sort date`
 - 후기·경험담 → `blog`, `cafearticle`
 - 장소·업체·주소 → `local` (최대 5건이라 검색어를 지역별로 쪼개 여러 번 호출)
-- 가격 → `shop --sort asc`
+- 가격 → `shop --sort asc` (API HUB에는 없음, 레거시 키 전용)
 - 일반 웹 정보 → `webkr`
 
 ## 작업 규칙
@@ -42,5 +43,5 @@ python3 .claude/skills/naver-search/scripts/naver_search.py "<검색어>" --type
 
 - `NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 가 없습니다` → 사용자에게 키 발급·설정을 안내 (README 참고).
 - `401` → 키가 틀렸거나 애플리케이션에 "검색" API가 추가되지 않음.
-- `429` → 일일 호출 한도(25,000회) 초과.
-- `네트워크 오류` / 프록시 403 → 환경 네트워크 설정에서 `openapi.naver.com` 허용 필요.
+- `429` → 호출 한도 초과.
+- `네트워크 오류` / 프록시 403 → 환경 네트워크 설정에서 `naverapihub.apigw.ntruss.com`(또는 `openapi.naver.com`) 허용 필요.
